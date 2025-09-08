@@ -10,7 +10,15 @@ RUN cd frontend && npm install
 
 COPY frontend ./frontend
 
-# Build React app
+# IMPORTANT: Pass build arguments for React environment variables
+ARG REACT_APP_SUPABASE_URL
+ARG REACT_APP_SUPABASE_ANON_KEY
+
+# Set environment variables for React build
+ENV REACT_APP_SUPABASE_URL=$REACT_APP_SUPABASE_URL
+ENV REACT_APP_SUPABASE_ANON_KEY=$REACT_APP_SUPABASE_ANON_KEY
+
+# Build React app with environment variables
 RUN cd frontend && npm run build
 
 # Stage 2 — Build backend with frontend static files
@@ -38,4 +46,3 @@ ENV PORT=5000
 # Start backend
 WORKDIR /app/backend
 CMD ["node", "server.js"]
-
