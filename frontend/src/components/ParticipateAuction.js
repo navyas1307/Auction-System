@@ -22,6 +22,7 @@ const ParticipateAuction = ({ onBack }) => {
   const [loadingAuctions, setLoadingAuctions] = useState(true);
   const [myBids, setMyBids] = useState([]); // Track user's bids
   const [isMyBidLeading, setIsMyBidLeading] = useState(false); // Track if user is winning
+  const [isPlacingBid, setIsPlacingBid] = useState(false); // Track bid placement state
 
   useEffect(() => {
     fetchAuctions();
@@ -54,6 +55,10 @@ const ParticipateAuction = ({ onBack }) => {
       // Socket event listeners
       socketService.onNewBid((data) => {
         console.log('🎉 Frontend received newBid event:', data);
+        
+        // Clear the "processing" state immediately
+        setIsPlacingBid(false);
+        
         setCurrentBid(parseFloat(data.bidAmount));
         
         // Update the highest bidder in the selected auction
@@ -63,9 +68,10 @@ const ParticipateAuction = ({ onBack }) => {
           highestBidder: data.bidderName
         }));
         
-        // Check if this is my bid by comparing name and email
-        const isMyBid = data.bidderEmail.toLowerCase() === bidderEmail.toLowerCase() && 
-                       data.bidderName.toLowerCase() === bidderName.toLowerCase();
+        // Check if this is my bid by comparing name and email (case insensitive)
+        const isMyBid = bidderName && bidderEmail && 
+                       data.bidderEmail.toLowerCase().trim() === bidderEmail.toLowerCase().trim() && 
+                       data.bidderName.toLowerCase().trim() === bidderName.toLowerCase().trim();
         
         if (isMyBid) {
           // Add to my bids and mark as leading
@@ -86,11 +92,16 @@ const ParticipateAuction = ({ onBack }) => {
           setMessageType('info');
         }
         
+        // Clear message after 8 seconds
         setTimeout(() => setMessage(''), 8000);
       });
 
       socketService.onBidError((error) => {
         console.log('❌ Frontend received bidError event:', error);
+        
+        // Clear the "processing" state immediately
+        setIsPlacingBid(false);
+        
         setMessage(error);
         setMessageType('error');
         setTimeout(() => setMessage(''), 5000);
@@ -98,6 +109,10 @@ const ParticipateAuction = ({ onBack }) => {
 
       socketService.onAuctionEnded((data) => {
         console.log('🏁 Frontend received auctionEnded event:', data);
+        
+        // Clear the "processing" state
+        setIsPlacingBid(false);
+        
         setIsAuctionEnded(true);
         
         // Update the final state
@@ -109,8 +124,8 @@ const ParticipateAuction = ({ onBack }) => {
           highestBidder: data.winner
         }));
         
-        // Check if I won
-        const didIWin = data.winner.toLowerCase() === bidderName.toLowerCase();
+        // Check if I won (case insensitive comparison)
+        const didIWin = bidderName && data.winner.toLowerCase().trim() === bidderName.toLowerCase().trim();
         if (didIWin) {
           setMessage(`🎉 CONGRATULATIONS! You won the auction with $${parseFloat(data.highestBid).toFixed(2)}!`);
           setMessageType('success');
@@ -149,6 +164,7 @@ const ParticipateAuction = ({ onBack }) => {
       // Reset bid tracking when selecting new auction
       setMyBids([]);
       setIsMyBidLeading(false);
+      setIsPlacingBid(false); // Reset placing bid state
       
       const response = await axios.get(`${API_BASE_URL}/api/auctions/${auction.id}`);
       setSelectedAuction(response.data);
@@ -194,6 +210,12 @@ const ParticipateAuction = ({ onBack }) => {
   };
 
   const placeBid = () => {
+    // Prevent multiple submissions
+    if (isPlacingBid) {
+      console.log('Bid placement already in progress');
+      return;
+    }
+
     if (!validateBidForm()) {
       setTimeout(() => setMessage(''), 5000);
       return;
@@ -209,7 +231,10 @@ const ParticipateAuction = ({ onBack }) => {
       return;
     }
 
-    // ✅ FIX: Include ALL required fields in the bid data
+    // Set placing bid state
+    setIsPlacingBid(true);
+
+    // Include ALL required fields in the bid data
     const bidData = {
       auctionId: selectedAuction.id,
       bidAmount: bid,
@@ -217,20 +242,25 @@ const ParticipateAuction = ({ onBack }) => {
       bidderName: bidderName.trim()
     };
 
-    console.log('🚀 Sending complete bid data:', bidData); // Debug log
+    console.log('🚀 Sending complete bid data:', bidData);
 
-    // ✅ SIMPLIFIED: Just send the bid and let socket events handle the response
+    // Send the bid
     socketService.placeBid(bidData);
     setBidAmount('');
+    
+    // Show processing message
     setMessage('Processing your bid...');
     setMessageType('info');
     
-    // Clear the processing message after a few seconds if no response
+    // Fallback: Clear processing state if no response after 15 seconds
     setTimeout(() => {
-      if (message === 'Processing your bid...') {
-        setMessage('');
+      if (isPlacingBid) {
+        setIsPlacingBid(false);
+        setMessage('Bid processing taking longer than expected. Please check if your bid was placed.');
+        setMessageType('warning');
+        setTimeout(() => setMessage(''), 5000);
       }
-    }, 10000);
+    }, 15000);
   };
 
   const formatTime = (milliseconds) => {
@@ -394,6 +424,7 @@ const ParticipateAuction = ({ onBack }) => {
                     className="form-input"
                     placeholder="Enter your complete name"
                     required
+                    disabled={isPlacingBid}
                   />
                 </div>
                 <div className="form-group">
@@ -405,6 +436,7 @@ const ParticipateAuction = ({ onBack }) => {
                     className="form-input"
                     placeholder="your.email@domain.com"
                     required
+                    disabled={isPlacingBid}
                   />
                 </div>
               </div>
@@ -421,6 +453,7 @@ const ParticipateAuction = ({ onBack }) => {
                     min={minimumBid}
                     placeholder={minimumBid.toFixed(2)}
                     required
+                    disabled={isPlacingBid}
                   />
                   <span className="bid-currency-symbol">$</span>
                 </div>
@@ -433,14 +466,17 @@ const ParticipateAuction = ({ onBack }) => {
               <button 
                 className="btn btn-primary" 
                 onClick={placeBid}
+                disabled={isPlacingBid}
                 style={{ 
                   width: '100%', 
                   fontSize: '1.2rem', 
                   padding: '18px',
-                  background: timeStatus === 'urgent' ? 'var(--error-color)' : 'linear-gradient(135deg, var(--primary-color), var(--primary-dark))'
+                  background: timeStatus === 'urgent' ? 'var(--error-color)' : 'linear-gradient(135deg, var(--primary-color), var(--primary-dark))',
+                  opacity: isPlacingBid ? 0.7 : 1,
+                  cursor: isPlacingBid ? 'not-allowed' : 'pointer'
                 }}
               >
-                {timeStatus === 'urgent' ? 'PLACE URGENT BID' : 'Place Bid'}
+                {isPlacingBid ? 'PLACING BID...' : (timeStatus === 'urgent' ? 'PLACE URGENT BID' : 'Place Bid')}
               </button>
             </div>
           </div>
