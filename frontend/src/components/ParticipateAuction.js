@@ -316,11 +316,20 @@ const ParticipateAuction = ({ onBack }) => {
       <div className="auction-room">
         <div className="auction-room-header">
           <h1 className="auction-room-title">Live Auction Room</h1>
-          {isMyBidLeading && !isAuctionEnded && (
-            <div className="leading-badge">
-              🏆 You are leading!
+          <div className="header-indicators">
+            {/* Connection Status Indicator */}
+            <div className={`connection-status ${connectionStatus.connected ? 'connected' : 'disconnected'}`}>
+              <div className="status-dot"></div>
+              <span className="status-text">
+                {connectionStatus.connected ? 'Connected' : 'Connecting...'}
+              </span>
             </div>
-          )}
+            {isMyBidLeading && !isAuctionEnded && (
+              <div className="leading-badge">
+                🏆 You are leading!
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="auction-info-card">
