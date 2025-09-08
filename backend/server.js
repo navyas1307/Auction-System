@@ -10,7 +10,6 @@ import auctionRoutes from './routes/auctions.js';
 import * as redisService from './services/redisService.js';
 import fs from 'fs';
 import sgMail from '@sendgrid/mail';
-import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -27,12 +26,6 @@ const io = new Server(server, {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Supabase client for user verification
-const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY // Use service role key for admin operations
-);
-
 // Initialize SendGrid if API key is provided
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY);
@@ -42,26 +35,26 @@ if (process.env.SENDGRID_API_KEY) {
 const publicDir = path.join(__dirname, 'public');
 const indexPath = path.join(publicDir, 'index.html');
 
-console.log('📂 Current directory:', __dirname);
-console.log('📂 Public directory:', publicDir);
-console.log('📄 Index file:', indexPath);
+console.log('ðŸ“‚ Current directory:', __dirname);
+console.log('ðŸ“‚ Public directory:', publicDir);
+console.log('ðŸ“„ Index file:', indexPath);
 
 try {
   if (fs.existsSync(publicDir)) {
-    console.log('✅ Public directory exists');
+    console.log('âœ… Public directory exists');
     const files = fs.readdirSync(publicDir);
-    console.log('📋 Files in public:', files.slice(0, 10)); // Show first 10 files
+    console.log('ðŸ“‹ Files in public:', files.slice(0, 10)); // Show first 10 files
   } else {
-    console.log('❌ Public directory does not exist');
+    console.log('âŒ Public directory does not exist');
   }
   
   if (fs.existsSync(indexPath)) {
-    console.log('✅ index.html exists');
+    console.log('âœ… index.html exists');
   } else {
-    console.log('❌ index.html does not exist');
+    console.log('âŒ index.html does not exist');
   }
 } catch (error) {
-  console.error('❌ Error checking files:', error.message);
+  console.error('âŒ Error checking files:', error.message);
 }
 
 // Middleware
@@ -81,7 +74,7 @@ let publicPath = null;
 for (const testPath of possiblePublicPaths) {
   if (fs.existsSync(testPath)) {
     publicPath = testPath;
-    console.log(`✅ Found public directory at: ${testPath}`);
+    console.log(`âœ… Found public directory at: ${testPath}`);
     break;
   }
 }
@@ -89,14 +82,14 @@ for (const testPath of possiblePublicPaths) {
 if (publicPath) {
   app.use(express.static(publicPath));
 } else {
-  console.log('❌ Could not find public directory at any expected location');
+  console.log('âŒ Could not find public directory at any expected location');
   console.log('Tried paths:', possiblePublicPaths);
 }
 
 // Debug middleware to log all API requests
 app.use('/api', (req, res, next) => {
-  console.log(`📡 API Request: ${req.method} ${req.path}`);
-  console.log('📦 Request body:', req.body);
+  console.log(`ðŸ“¡ API Request: ${req.method} ${req.path}`);
+  console.log('ðŸ“¦ Request body:', req.body);
   next();
 });
 
@@ -124,9 +117,7 @@ app.get('/api/debug', async (req, res) => {
         nodeEnv: process.env.NODE_ENV,
         port: process.env.PORT,
         databaseUrl: process.env.DATABASE_URL ? 'Set' : 'Not set',
-        upstashRedisUrl: process.env.UPSTASH_REDIS_URL ? 'Set' : 'Not set',
-        supabaseUrl: process.env.SUPABASE_URL ? 'Set' : 'Not set',
-        supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Set' : 'Not set'
+        upstashRedisUrl: process.env.UPSTASH_REDIS_URL ? 'Set' : 'Not set'
       }
     });
   } catch (error) {
@@ -140,24 +131,24 @@ app.get('/api/debug', async (req, res) => {
 // API Routes - MUST come before the catch-all handler
 try {
   // Check if the route file exists and dependencies are available
-  console.log('🔍 Checking auction route dependencies...');
+  console.log('ðŸ” Checking auction route dependencies...');
   
   // Test if models are available
-  console.log('📦 Auction model available:', typeof Auction !== 'undefined');
-  console.log('📦 Bid model available:', typeof Bid !== 'undefined');
+  console.log('ðŸ“¦ Auction model available:', typeof Auction !== 'undefined');
+  console.log('ðŸ“¦ Bid model available:', typeof Bid !== 'undefined');
   
   // Test Redis service
   try {
     await redisService.getCurrentHighestBid(1); // Test call
-    console.log('✅ Redis service is available');
+    console.log('âœ… Redis service is available');
   } catch (redisError) {
-    console.log('⚠️ Redis service issue:', redisError.message);
+    console.log('âš ï¸ Redis service issue:', redisError.message);
   }
   
   app.use('/api/auctions', auctionRoutes);
-  console.log('✅ Auction routes loaded successfully');
+  console.log('âœ… Auction routes loaded successfully');
 } catch (error) {
-  console.error('❌ Error loading auction routes:', error.message);
+  console.error('âŒ Error loading auction routes:', error.message);
   console.error('Stack:', error.stack);
   
   // Fallback routes if the main routes file fails
@@ -180,17 +171,17 @@ try {
 
 // Catch-all handler: send back React's index.html file for any non-API routes
 app.get('*', (req, res) => {
-  console.log(`🔥 Request for: ${req.path}`);
+  console.log(`ðŸ“¥ Request for: ${req.path}`);
   
   // Only serve index.html for non-API routes
   if (!req.path.startsWith('/api/')) {
     const indexFile = publicPath ? path.join(publicPath, 'index.html') : path.join(__dirname, 'public', 'index.html');
     
     if (fs.existsSync(indexFile)) {
-      console.log(`✅ Serving index.html for: ${req.path}`);
+      console.log(`âœ… Serving index.html for: ${req.path}`);
       res.sendFile(indexFile);
     } else {
-      console.log(`❌ index.html not found at: ${indexFile}`);
+      console.log(`âŒ index.html not found at: ${indexFile}`);
       res.status(404).send(`
         <h1>React App Not Found</h1>
         <p>The React build files are not available.</p>
@@ -204,68 +195,21 @@ app.get('*', (req, res) => {
   }
 });
 
-// Socket.IO connection handling with proper authentication
+// Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
-  
-  let authenticatedUser = null;
 
-  // Handle authentication
-  socket.on('authenticate', async (token) => {
-    try {
-      console.log('Authentication attempt for socket:', socket.id);
-      
-      if (!token) {
-        socket.emit('authenticated', { success: false, error: 'No token provided' });
-        return;
-      }
-
-      // Verify token with Supabase
-      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-      
-      if (error || !user) {
-        console.error('Token verification failed:', error);
-        socket.emit('authenticated', { success: false, error: 'Invalid token' });
-        return;
-      }
-
-      authenticatedUser = user;
-      socket.userId = user.id;
-      socket.userEmail = user.email;
-      socket.userName = user.user_metadata?.full_name || user.email.split('@')[0];
-      
-      console.log('Socket authenticated successfully:', {
-        userId: user.id,
-        email: user.email,
-        name: socket.userName
-      });
-      
-      socket.emit('authenticated', { success: true, user: { id: user.id, email: user.email } });
-      
-    } catch (error) {
-      console.error('Authentication error:', error);
-      socket.emit('authenticated', { success: false, error: 'Authentication failed' });
-    }
-  });
-
-  // Join auction room
+  // Join auction room - matching your frontend event names
   socket.on('joinAuction', (auctionId) => {
     socket.join(`auction_${auctionId}`);
     console.log(`User ${socket.id} joined auction ${auctionId}`);
   });
 
-  // Handle bid placement with proper authentication
+  // Handle bid placement - matching your frontend event names
   socket.on('placeBid', async (bidData) => {
     try {
-      const { auctionId, bidAmount } = bidData;
-      
-      // Check if user is authenticated
-      if (!authenticatedUser || !socket.userId) {
-        socket.emit('bidError', 'Please refresh the page and sign in again');
-        return;
-      }
-
-      console.log(`Received bid: ${bidAmount} from ${socket.userName} (ID: ${socket.userId}) for auction ${auctionId}`);
+      const { auctionId, bidAmount, bidderEmail, bidderName } = bidData;
+      console.log(`Received bid: ${bidAmount} from ${bidderName} for auction ${auctionId}`);
       
       // Get auction details
       const auction = await Auction.findByPk(auctionId);
@@ -290,12 +234,6 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Check if user is trying to bid on their own auction
-      if (auction.sellerId === socket.userId) {
-        socket.emit('bidError', 'You cannot bid on your own auction');
-        return;
-      }
-
       // Get current highest bid
       const currentHighestBid = await redisService.getCurrentHighestBid(auctionId);
       const minimumBid = currentHighestBid + parseFloat(auction.bidIncrement);
@@ -306,58 +244,30 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Save bid to database with proper bidderId
-      const newBid = await Bid.create({
-        auctionId: parseInt(auctionId),
-        bidAmount: parseFloat(bidAmount),
-        bidderId: socket.userId,  // This was missing!
-        bidderName: socket.userName,
-        bidderEmail: socket.userEmail
-      });
-
-      console.log('✅ Bid saved to database:', {
-        id: newBid.id,
+      // Save bid to database
+      await Bid.create({
         auctionId,
-        bidAmount,
-        bidderId: socket.userId,
-        bidderName: socket.userName
+        bidAmount: parseFloat(bidAmount),
+        bidderName,
+        bidderEmail
       });
 
       // Update highest bid in Redis
-      await redisService.setHighestBid(auctionId, bidAmount, socket.userEmail, socket.userName);
+      await redisService.setHighestBid(auctionId, bidAmount, bidderEmail, bidderName);
 
       // Broadcast new bid to all users in the auction room
-      const bidNotification = {
-        auctionId: parseInt(auctionId),
+      io.to(`auction_${auctionId}`).emit('newBid', {
+        auctionId,
         bidAmount: parseFloat(bidAmount),
-        bidderName: socket.userName,
-        bidderEmail: socket.userEmail,
-        bidTime: new Date().toISOString()
-      };
-
-      io.to(`auction_${auctionId}`).emit('newBid', bidNotification);
-
-      console.log(`✅ New bid broadcast: $${bidAmount} by ${socket.userName} on auction ${auctionId}`);
-
-      // Send success confirmation to the bidder
-      socket.emit('bidSuccess', {
-        message: 'Bid placed successfully!',
-        bidAmount: parseFloat(bidAmount)
+        bidderName,
+        bidderEmail
       });
 
+      console.log(`âœ… New bid placed: $${bidAmount} by ${bidderName} on auction ${auctionId}`);
+
     } catch (error) {
-      console.error('❌ Error placing bid:', error);
-      
-      // Send specific error message based on error type
-      let errorMessage = 'Failed to place bid. Please try again.';
-      
-      if (error.name === 'SequelizeValidationError') {
-        errorMessage = 'Invalid bid data. Please refresh and try again.';
-      } else if (error.name === 'SequelizeUniqueConstraintError') {
-        errorMessage = 'Bid conflict. Please refresh and try again.';
-      }
-      
-      socket.emit('bidError', errorMessage);
+      console.error('âŒ Error placing bid:', error);
+      socket.emit('bidError', 'Failed to place bid. Please try again.');
     }
   });
 
@@ -369,7 +279,7 @@ io.on('connection', (socket) => {
 // Function to end auction with email notifications
 const endAuction = async (auctionId) => {
   try {
-    console.log(`🏁 Ending auction ${auctionId}...`);
+    console.log(`ðŸ Ending auction ${auctionId}...`);
     
     // Update auction status
     await Auction.update(
@@ -400,7 +310,7 @@ const endAuction = async (auctionId) => {
         itemName: auction.itemName
       });
 
-      console.log(`✅ Auction ${auctionId} ended. Winner: ${winnerData.bidderName} with $${winnerData.amount}`);
+      console.log(`âœ… Auction ${auctionId} ended. Winner: ${winnerData.bidderName} with $${winnerData.amount}`);
     } else {
       // No bids were placed or no email setup
       io.to(`auction_${auctionId}`).emit('auctionEnded', {
@@ -410,11 +320,11 @@ const endAuction = async (auctionId) => {
         itemName: auction.itemName
       });
 
-      console.log(`✅ Auction ${auctionId} ended with ${winnerData ? 'winner: ' + winnerData.bidderName : 'no bids'}`);
+      console.log(`âœ… Auction ${auctionId} ended with ${winnerData ? 'winner: ' + winnerData.bidderName : 'no bids'}`);
     }
 
   } catch (error) {
-    console.error(`❌ Error ending auction ${auctionId}:`, error);
+    console.error(`âŒ Error ending auction ${auctionId}:`, error);
   }
 };
 
@@ -422,7 +332,7 @@ const endAuction = async (auctionId) => {
 const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningBid, winnerName, sellerName) => {
   try {
     if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
-      console.log('⚠️ SendGrid not configured, skipping email notifications');
+      console.log('âš ï¸ SendGrid not configured, skipping email notifications');
       return;
     }
 
@@ -432,7 +342,7 @@ const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningB
       from: process.env.SENDGRID_FROM_EMAIL,
       subject: `Auction Ended - ${itemName}`,
       html: `
-        <h2>Your Auction Has Ended! 🎉</h2>
+        <h2>Your Auction Has Ended! ðŸŽ‰</h2>
         <p>Dear ${sellerName},</p>
         <p>Your auction for <strong>${itemName}</strong> has ended.</p>
         <p><strong>Winning Bid:</strong> $${parseFloat(winningBid).toFixed(2)}</p>
@@ -450,7 +360,7 @@ const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningB
       from: process.env.SENDGRID_FROM_EMAIL,
       subject: `Congratulations! You Won - ${itemName}`,
       html: `
-        <h2>Congratulations! You Won the Auction! 🏆</h2>
+        <h2>Congratulations! You Won the Auction! ðŸ†</h2>
         <p>Dear ${winnerName},</p>
         <p>You have won the auction for <strong>${itemName}</strong>!</p>
         <p><strong>Your Winning Bid:</strong> $${parseFloat(winningBid).toFixed(2)}</p>
@@ -467,9 +377,9 @@ const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningB
       sgMail.send(bidderMsg)
     ]);
     
-    console.log('📧 Auction end emails sent successfully');
+    console.log('ðŸ“§ Auction end emails sent successfully');
   } catch (error) {
-    console.error('❌ Error sending emails:', error);
+    console.error('âŒ Error sending emails:', error);
   }
 };
 
@@ -481,14 +391,13 @@ const PORT = process.env.PORT || 3000;
 
 try {
   await initializeDatabase();
-  console.log('✅ Database initialized successfully');
+  console.log('âœ… Database initialized successfully');
   
   server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📧 Email notifications: ${process.env.SENDGRID_API_KEY ? 'Enabled' : 'Disabled (add SENDGRID_API_KEY to enable)'}`);
-    console.log(`🔐 Supabase auth: ${process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? 'Configured' : 'Missing credentials'}`);
+    console.log(`ðŸš€ Server running on port ${PORT}`);
+    console.log(`ðŸ“§ Email notifications: ${process.env.SENDGRID_API_KEY ? 'Enabled' : 'Disabled (add SENDGRID_API_KEY to enable)'}`);
   });
 } catch (error) {
-  console.error('❌ Failed to start server:', error);
+  console.error('âŒ Failed to start server:', error);
   process.exit(1);
 }
