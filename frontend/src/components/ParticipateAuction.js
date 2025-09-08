@@ -231,9 +231,7 @@ const ParticipateAuction = ({ onBack }) => {
     try {
       socket.emit('placeBid', {
         auctionId: selectedAuction.id,
-        bidAmount: bidValue,
-        bidderName: user.user_metadata?.full_name || user.email.split('@')[0],
-        bidderEmail: user.email
+        bidAmount: bidValue
       });
 
       // Reset bidding state after a longer delay if no response received
