@@ -83,7 +83,7 @@ export const Auction = sequelize.define('Auction', {
   }
 });
 
-// Define Bid model with optional user authentication
+// Define Bid model with optional user authentication for guest bidding
 export const Bid = sequelize.define('Bid', {
   id: {
     type: DataTypes.INTEGER,
