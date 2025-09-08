@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import io from 'socket.io-client';
-import { useAuth } from '../contexts/AuthContext';
+import socketService from '../services/socketService';
 
 // API base URL - use relative URL for production, localhost for development
 const API_BASE_URL = process.env.NODE_ENV === 'development' 
@@ -9,94 +8,107 @@ const API_BASE_URL = process.env.NODE_ENV === 'development'
   : '';  // Empty string for production (same domain)
 
 const ParticipateAuction = ({ onBack }) => {
-  const { user, getAccessToken } = useAuth();
   const [auctions, setAuctions] = useState([]);
   const [selectedAuction, setSelectedAuction] = useState(null);
   const [bidAmount, setBidAmount] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [bidding, setBidding] = useState(false);
+  const [bidderName, setBidderName] = useState('');
+  const [bidderEmail, setBidderEmail] = useState('');
+  const [currentBid, setCurrentBid] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState(0);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('');
-  const [socket, setSocket] = useState(null);
-  const [bids, setBids] = useState([]);
+  const [isAuctionEnded, setIsAuctionEnded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingAuctions, setLoadingAuctions] = useState(true);
 
   useEffect(() => {
     fetchAuctions();
-    
-    // Initialize socket connection
-    const newSocket = io(API_BASE_URL);
-    setSocket(newSocket);
+  }, []);
 
-    // Authenticate socket if user is logged in
-    if (user) {
-      getAccessToken().then(token => {
-        if (token) {
-          newSocket.emit('authenticate', token);
+  useEffect(() => {
+    if (selectedAuction) {
+      const socket = socketService.connect();
+      socketService.joinAuction(selectedAuction.id);
+
+      // Calculate time remaining
+      const startTime = new Date(selectedAuction.startTime);
+      const endTime = new Date(startTime.getTime() + selectedAuction.duration * 60 * 1000);
+      const now = new Date();
+      const remaining = Math.max(0, endTime - now);
+      setTimeRemaining(remaining);
+
+      // Set up timer
+      const timer = setInterval(() => {
+        const now = new Date();
+        const remaining = Math.max(0, endTime - now);
+        setTimeRemaining(remaining);
+        
+        if (remaining <= 0) {
+          setIsAuctionEnded(true);
+          clearInterval(timer);
         }
+      }, 1000);
+
+      // Socket event listeners
+      socketService.onNewBid((data) => {
+        setCurrentBid(parseFloat(data.bidAmount));
+        setMessage(`New bid placed: $${parseFloat(data.bidAmount).toFixed(2)} by ${data.bidderName}`);
+        setMessageType('info');
+        setTimeout(() => setMessage(''), 5000);
       });
+
+      socketService.onBidError((error) => {
+        setMessage(error);
+        setMessageType('error');
+        setTimeout(() => setMessage(''), 5000);
+      });
+
+      socketService.onAuctionEnded((data) => {
+        setIsAuctionEnded(true);
+        setMessage(`Auction completed! Winner: ${data.winner} with $${parseFloat(data.highestBid).toFixed(2)}`);
+        setMessageType('success');
+      });
+
+      return () => {
+        clearInterval(timer);
+        socketService.removeAllListeners();
+        socketService.disconnect();
+      };
     }
-
-    newSocket.on('authenticated', (data) => {
-      if (data.success) {
-        console.log('Socket authenticated successfully');
-      } else {
-        console.error('Socket authentication failed:', data.error);
-      }
-    });
-
-    newSocket.on('newBid', (bidData) => {
-      console.log('New bid received:', bidData);
-      updateAuctionBid(bidData);
-      
-      if (selectedAuction && selectedAuction.id === bidData.auctionId) {
-        setBids(prevBids => [bidData, ...prevBids.slice(0, 19)]); // Keep last 20 bids
-        fetchAuctionDetails(bidData.auctionId); // Refresh auction details
-      }
-    });
-
-    newSocket.on('auctionEnded', (data) => {
-      console.log('Auction ended:', data);
-      setMessage(`Auction for "${data.itemName}" has ended! Winner: ${data.winner} with $${parseFloat(data.highestBid).toFixed(2)}`);
-      setMessageType('info');
-      setTimeout(() => setMessage(''), 10000);
-      
-      // Refresh auctions to update status
-      fetchAuctions();
-      
-      if (selectedAuction && selectedAuction.id === data.auctionId) {
-        fetchAuctionDetails(data.auctionId);
-      }
-    });
-
-    newSocket.on('bidError', (error) => {
-      setMessage(error);
-      setMessageType('error');
-      setBidding(false);
-      setTimeout(() => setMessage(''), 5000);
-    });
-
-    return () => {
-      newSocket.close();
-    };
-  }, [user]);
+  }, [selectedAuction]);
 
   const fetchAuctions = async () => {
     try {
-      setLoading(true);
-      const headers = {};
-      
-      if (user) {
-        const token = await getAccessToken();
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-      }
-
-      const response = await axios.get(`${API_BASE_URL}/api/auctions/active`, { headers });
+      setLoadingAuctions(true);
+      const response = await axios.get(`${API_BASE_URL}/api/auctions/active`);
       setAuctions(response.data);
     } catch (error) {
       console.error('Error fetching auctions:', error);
-      setMessage('Failed to fetch auctions');
+      setMessage('Failed to load auctions. Please try again.');
+      setMessageType('error');
+      setTimeout(() => setMessage(''), 5000);
+    } finally {
+      setLoadingAuctions(false);
+    }
+  };
+
+  const selectAuction = async (auction) => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${API_BASE_URL}/api/auctions/${auction.id}`);
+      setSelectedAuction(response.data);
+      setCurrentBid(parseFloat(response.data.currentHighestBid));
+      
+      // Check if auction has ended
+      const startTime = new Date(response.data.startTime);
+      const endTime = new Date(startTime.getTime() + response.data.duration * 60 * 1000);
+      const now = new Date();
+      if (now >= endTime) {
+        setIsAuctionEnded(true);
+      }
+    } catch (error) {
+      console.error('Error fetching auction details:', error);
+      setMessage('Failed to load auction details. Please try again.');
       setMessageType('error');
       setTimeout(() => setMessage(''), 5000);
     } finally {
@@ -104,327 +116,432 @@ const ParticipateAuction = ({ onBack }) => {
     }
   };
 
-  const fetchAuctionDetails = async (auctionId) => {
-    try {
-      const headers = {};
-      
-      if (user) {
-        const token = await getAccessToken();
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-      }
-
-      const response = await axios.get(`${API_BASE_URL}/api/auctions/${auctionId}`, { headers });
-      setSelectedAuction(response.data);
-      
-      // Fetch recent bids
-      const bidsResponse = await axios.get(`${API_BASE_URL}/api/auctions/${auctionId}/bids`);
-      setBids(bidsResponse.data);
-    } catch (error) {
-      console.error('Error fetching auction details:', error);
+  const validateBidForm = () => {
+    if (!bidderName.trim()) {
+      setMessage('Please enter your name');
+      setMessageType('error');
+      return false;
     }
-  };
-
-  const updateAuctionBid = (bidData) => {
-    setAuctions(prevAuctions => 
-      prevAuctions.map(auction => 
-        auction.id === bidData.auctionId 
-          ? { 
-              ...auction, 
-              currentHighestBid: bidData.bidAmount,
-              highestBidder: bidData.bidderName
-            }
-          : auction
-      )
-    );
-
-    if (selectedAuction && selectedAuction.id === bidData.auctionId) {
-      setSelectedAuction(prev => ({
-        ...prev,
-        currentHighestBid: bidData.bidAmount,
-        highestBidder: bidData.bidderName
-      }));
-    }
-  };
-
-  const selectAuction = (auction) => {
-    setSelectedAuction(auction);
-    setBidAmount('');
-    fetchAuctionDetails(auction.id);
     
-    if (socket) {
-      socket.emit('joinAuction', auction.id);
+    if (!bidderEmail.trim() || !bidderEmail.includes('@')) {
+      setMessage('Please enter a valid email address');
+      setMessageType('error');
+      return false;
     }
+    
+    if (!bidAmount || parseFloat(bidAmount) <= 0) {
+      setMessage('Please enter a valid bid amount');
+      setMessageType('error');
+      return false;
+    }
+    
+    return true;
   };
 
-  const handleBid = async () => {
-    if (!user) {
-      setMessage('You must be logged in to place bids');
-      setMessageType('error');
+  const placeBid = () => {
+    if (!validateBidForm()) {
       setTimeout(() => setMessage(''), 5000);
       return;
     }
 
-    if (!selectedAuction) {
-      setMessage('Please select an auction first');
-      setMessageType('error');
-      setTimeout(() => setMessage(''), 5000);
-      return;
-    }
-
-    const bidValue = parseFloat(bidAmount);
-    const minimumBid = parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement);
-
-    if (isNaN(bidValue) || bidValue < minimumBid) {
+    const bid = parseFloat(bidAmount);
+    const minimumBid = parseFloat(currentBid) + parseFloat(selectedAuction.bidIncrement);
+    
+    if (bid < minimumBid) {
       setMessage(`Bid must be at least $${minimumBid.toFixed(2)}`);
       setMessageType('error');
       setTimeout(() => setMessage(''), 5000);
       return;
     }
 
-    setBidding(true);
+    // ✅ FIX: Include ALL required fields in the bid data
+    const bidData = {
+      auctionId: selectedAuction.id,
+      bidAmount: bid,
+      bidderEmail: bidderEmail.trim(),
+      bidderName: bidderName.trim()
+    };
+
+    console.log('🚀 Sending complete bid data:', bidData); // Debug log
+
+    const success = socketService.placeBid(bidData);
     
-    if (socket) {
-      socket.emit('placeBid', {
-        auctionId: selectedAuction.id,
-        bidAmount: bidValue
-      });
+    if (success) {
+      setBidAmount('');
+      setMessage('Processing your bid...');
+      setMessageType('info');
     } else {
-      setMessage('Connection error. Please refresh the page.');
+      setMessage('Failed to connect to auction server. Please try again.');
       setMessageType('error');
-      setBidding(false);
       setTimeout(() => setMessage(''), 5000);
     }
-
-    // Reset bidding state after a delay (will be reset earlier if bid succeeds/fails)
-    setTimeout(() => setBidding(false), 5000);
   };
 
-  const formatTimeRemaining = (timeRemaining) => {
-    if (timeRemaining <= 0) return 'Ended';
-    
-    const hours = Math.floor(timeRemaining / (1000 * 60 * 60));
-    const minutes = Math.floor((timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
+  const formatTime = (milliseconds) => {
+    const hours = Math.floor(milliseconds / 3600000);
+    const minutes = Math.floor((milliseconds % 3600000) / 60000);
+    const seconds = Math.floor((milliseconds % 60000) / 1000);
     
     if (hours > 0) {
-      return `${hours}h ${minutes}m remaining`;
+      return `${hours}h ${minutes}m ${seconds}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
     } else {
-      return `${minutes}m remaining`;
+      return `${seconds}s`;
     }
   };
 
-  const renderAuctionList = () => (
-    <div className="auctions-list">
-      <div className="list-header">
-        <h2>Active Auctions</h2>
-        <button onClick={fetchAuctions} className="btn btn-secondary">
-          Refresh
-        </button>
+  const getMinimumBid = () => {
+    if (!selectedAuction) return 0;
+    return parseFloat(currentBid) + parseFloat(selectedAuction.bidIncrement);
+  };
+
+  const getTimeStatus = () => {
+    if (timeRemaining <= 0) return 'ended';
+    if (timeRemaining < 300000) return 'urgent'; // Less than 5 minutes
+    if (timeRemaining < 3600000) return 'soon'; // Less than 1 hour
+    return 'active';
+  };
+
+  const SingleImageDisplay = ({ image, itemName }) => {
+    if (!image) return null;
+
+    return (
+      <div className="image-gallery">
+        <div className="main-image-container">
+          <img 
+            src={image.data} 
+            alt={itemName}
+            className="main-auction-image-single"
+          />
+        </div>
       </div>
-      
-      {loading ? (
-        <div className="loading-container">
-          <div className="loading-spinner"></div>
-          <p>Loading auctions...</p>
+    );
+  };
+
+  // Auction Room View
+  if (selectedAuction) {
+    const minimumBid = getMinimumBid();
+    const timeStatus = getTimeStatus();
+    // Get the first (and only) image
+    const itemImage = selectedAuction.images && selectedAuction.images.length > 0 ? selectedAuction.images[0] : null;
+    
+    return (
+      <div className="auction-room">
+        <div className="auction-room-header">
+          <h1 className="auction-room-title">Live Auction Room</h1>
         </div>
-      ) : auctions.length === 0 ? (
-        <div className="empty-state">
-          <p>No active auctions at the moment.</p>
-          <button onClick={fetchAuctions} className="btn btn-primary">
-            Refresh
-          </button>
-        </div>
-      ) : (
-        <div className="auctions-grid">
-          {auctions.map(auction => (
-            <div 
-              key={auction.id} 
-              className={`auction-card ${selectedAuction?.id === auction.id ? 'selected' : ''}`}
-              onClick={() => selectAuction(auction)}
-            >
-              {auction.images && auction.images.length > 0 && (
-                <div className="auction-image">
-                  <img src={auction.images[0].data} alt={auction.itemName} />
+
+        <div className="auction-info-card">
+          <div className="auction-info-header">
+            <div className="auction-details">
+              <h3>{selectedAuction.itemName}</h3>
+              
+              {/* Single Image Display */}
+              <SingleImageDisplay 
+                image={itemImage} 
+                itemName={selectedAuction.itemName}
+              />
+              
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '1.1rem', lineHeight: '1.6' }}>
+                {selectedAuction.description}
+              </p>
+              <div className="seller-info">
+                <div className="seller-avatar">
+                  {selectedAuction.sellerName.charAt(0).toUpperCase()}
                 </div>
-              )}
-              <div className="auction-info">
-                <h3 className="auction-title">{auction.itemName}</h3>
-                <p className="auction-description">{auction.description}</p>
-                <div className="auction-details">
-                  <div className="price-info">
-                    <span className="current-bid">${parseFloat(auction.currentHighestBid).toFixed(2)}</span>
-                    <span className="bid-info">Current Bid</span>
-                  </div>
-                  <div className="time-info">
-                    <span className="time-remaining">{formatTimeRemaining(auction.timeRemaining)}</span>
-                  </div>
-                  <div className="seller-info">
-                    <span className="seller">By: {auction.sellerName}</span>
-                    {auction.isOwner && (
-                      <span className="owner-badge">Your Auction</span>
-                    )}
-                  </div>
+                <div className="seller-details">
+                  <div className="seller-name">{selectedAuction.sellerName}</div>
+                  <div className="seller-role">Verified Seller</div>
                 </div>
-                {auction.highestBidder && (
-                  <div className="highest-bidder">
-                    Leading: {auction.highestBidder}
-                  </div>
-                )}
               </div>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  const renderAuctionDetails = () => (
-    <div className="auction-details-panel">
-      <div className="details-header">
-        <h2>{selectedAuction.itemName}</h2>
-        <button 
-          onClick={() => setSelectedAuction(null)} 
-          className="btn btn-secondary"
-        >
-          Back to List
-        </button>
-      </div>
-
-      <div className="details-content">
-        {selectedAuction.images && selectedAuction.images.length > 0 && (
-          <div className="auction-main-image">
-            <img src={selectedAuction.images[0].data} alt={selectedAuction.itemName} />
-          </div>
-        )}
-
-        <div className="auction-info-detailed">
-          <div className="description-section">
-            <h3>Description</h3>
-            <p>{selectedAuction.description || 'No description provided.'}</p>
-          </div>
-
-          <div className="pricing-section">
-            <div className="price-row">
-              <span className="label">Starting Price:</span>
-              <span className="value">${parseFloat(selectedAuction.startingPrice).toFixed(2)}</span>
-            </div>
-            <div className="price-row">
-              <span className="label">Current Highest Bid:</span>
-              <span className="value current-bid">${parseFloat(selectedAuction.currentHighestBid).toFixed(2)}</span>
-            </div>
-            <div className="price-row">
-              <span className="label">Bid Increment:</span>
-              <span className="value">${parseFloat(selectedAuction.bidIncrement).toFixed(2)}</span>
-            </div>
-            <div className="price-row">
-              <span className="label">Next Minimum Bid:</span>
-              <span className="value highlight">${(parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement)).toFixed(2)}</span>
+            
+            <div className="auction-status">
+              <div className={`status-badge status-${timeStatus}`}>
+                {timeStatus === 'ended' && 'Auction Ended'}
+                {timeStatus === 'urgent' && 'Final Minutes'}
+                {timeStatus === 'soon' && 'Ending Soon'}
+                {timeStatus === 'active' && 'Live Now'}
+              </div>
             </div>
           </div>
 
-          <div className="time-section">
-            <div className="time-remaining-display">
-              {formatTimeRemaining(selectedAuction.timeRemaining)}
+          <div className="auction-stats">
+            <div className="stat-item">
+              <div className="stat-label">Current Highest Bid</div>
+              <div className="stat-value" style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>
+                ${currentBid.toFixed(2)}
+              </div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-label">Bid Increment</div>
+              <div className="stat-value">${parseFloat(selectedAuction.bidIncrement).toFixed(2)}</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-label">Leading Bidder</div>
+              <div className="stat-value">
+                {selectedAuction.highestBidder || 'No bids yet'}
+              </div>
             </div>
           </div>
 
-          <div className="seller-section">
-            <h4>Seller Information</h4>
-            <p><strong>Name:</strong> {selectedAuction.sellerName}</p>
-            {user && (selectedAuction.isOwner || selectedAuction.status === 'ended') && selectedAuction.sellerEmail && (
-              <p><strong>Email:</strong> {selectedAuction.sellerEmail}</p>
+          <div className={`timer ${timeStatus === 'urgent' ? 'urgent' : ''}`}>
+            {timeRemaining > 0 ? (
+              <>
+                Time Remaining: {formatTime(timeRemaining)}
+                {timeStatus === 'urgent' && ' - FINAL MINUTES!'}
+              </>
+            ) : (
+              'AUCTION ENDED'
             )}
           </div>
         </div>
+
+        {!isAuctionEnded && timeRemaining > 0 && (
+          <div className="bid-section">
+            <h2 className="bid-section-title">Place Your Bid</h2>
+            
+            <div className="bid-form">
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Full Name *</label>
+                  <input
+                    type="text"
+                    value={bidderName}
+                    onChange={(e) => setBidderName(e.target.value)}
+                    className="form-input"
+                    placeholder="Enter your complete name"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email Address *</label>
+                  <input
+                    type="email"
+                    value={bidderEmail}
+                    onChange={(e) => setBidderEmail(e.target.value)}
+                    className="form-input"
+                    placeholder="your.email@domain.com"
+                    required
+                  />
+                </div>
+              </div>
+              
+              <div className="form-group">
+                <label className="form-label">Bid Amount (USD) *</label>
+                <div className="bid-input-group">
+                  <input
+                    type="number"
+                    value={bidAmount}
+                    onChange={(e) => setBidAmount(e.target.value)}
+                    className="bid-amount-input"
+                    step="0.01"
+                    min={minimumBid}
+                    placeholder={minimumBid.toFixed(2)}
+                    required
+                  />
+                  <span className="bid-currency-symbol">$</span>
+                </div>
+              </div>
+              
+              <div className="minimum-bid-info">
+                Minimum bid required: <strong>${minimumBid.toFixed(2)}</strong>
+              </div>
+              
+              <button 
+                className="btn btn-primary" 
+                onClick={placeBid}
+                style={{ 
+                  width: '100%', 
+                  fontSize: '1.2rem', 
+                  padding: '18px',
+                  background: timeStatus === 'urgent' ? 'var(--error-color)' : 'linear-gradient(135deg, var(--primary-color), var(--primary-dark))'
+                }}
+              >
+                {timeStatus === 'urgent' ? 'PLACE URGENT BID' : 'Place Bid'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isAuctionEnded && (
+          <div className="auction-info-card">
+            <div style={{ textAlign: 'center' }}>
+              <h3 style={{ fontSize: '2rem', marginBottom: '20px', color: 'var(--text-primary)' }}>
+                Auction Completed
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', marginBottom: '24px' }}>
+                This auction has concluded. If you were the winning bidder, 
+                you'll receive a confirmation email with payment instructions.
+              </p>
+              {selectedAuction.highestBidder && (
+                <div style={{ 
+                  marginTop: '24px', 
+                  padding: '24px', 
+                  background: 'linear-gradient(135deg, #dcfce7, #bbf7d0)',
+                  borderRadius: 'var(--radius-xl)',
+                  border: '2px solid #bbf7d0'
+                }}>
+                  <div style={{ color: '#166534', fontWeight: '700', fontSize: '1.2rem' }}>
+                    Winner: {selectedAuction.highestBidder}
+                  </div>
+                  <div style={{ color: '#166534', fontWeight: '800', fontSize: '1.8rem', marginTop: '8px' }}>
+                    Final Bid: ${currentBid.toFixed(2)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Message Display */}
+        {message && (
+          <div className={`message message-${messageType}`}>
+            {message}
+          </div>
+        )}
+
+        <div className="form-actions">
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setSelectedAuction(null)}
+          >
+            Browse Other Auctions
+          </button>
+          <button className="btn btn-secondary" onClick={onBack}>
+            Back to Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Auction List View
+  return (
+    <div className="form-container">
+      <div className="form-header">
+        <h1 className="form-title">Active Auctions</h1>
+        <p className="form-subtitle">
+          Discover unique items and participate in real-time bidding with sellers from around the world
+        </p>
       </div>
 
-      {/* Bidding Section */}
-      {selectedAuction.status === 'active' && selectedAuction.timeRemaining > 0 && (
-        <div className="bidding-section">
-          {!user ? (
-            <div className="auth-required">
-              <p>You must be logged in to place bids</p>
-            </div>
-          ) : selectedAuction.isOwner ? (
-            <div className="own-auction-notice">
-              <p>You cannot bid on your own auction</p>
-            </div>
-          ) : (
-            <div className="bid-form">
-              <h3>Place Your Bid</h3>
-              <div className="bid-input-group">
-                <input
-                  type="number"
-                  value={bidAmount}
-                  onChange={(e) => setBidAmount(e.target.value)}
-                  placeholder={`Minimum: $${(parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement)).toFixed(2)}`}
-                  step="0.01"
-                  min={parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement)}
-                  disabled={bidding}
-                  className="bid-input"
-                />
-                <button 
-                  onClick={handleBid} 
-                  disabled={bidding || !bidAmount}
-                  className="btn btn-primary bid-button"
-                >
-                  {bidding ? 'Placing Bid...' : 'Place Bid'}
-                </button>
+      {loadingAuctions ? (
+        <div className="loading">
+          <div className="loading-spinner"></div>
+          <p>Loading active auctions...</p>
+        </div>
+      ) : auctions.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon">🔭</div>
+          <h3 className="empty-state-title">
+            No Active Auctions
+          </h3>
+          <p className="empty-state-description">
+            There are currently no active auctions available. Check back soon for new listings 
+            or create your own auction to get started.
+          </p>
+          <button className="btn btn-primary" onClick={fetchAuctions}>
+            Refresh Auctions
+          </button>
+        </div>
+      ) : (
+        <div className="auction-list">
+          {auctions.map((auction) => {
+            const currentBid = parseFloat(auction.currentHighestBid);
+            const startingPrice = parseFloat(auction.startingPrice);
+            const bidIncrement = parseFloat(auction.bidIncrement);
+            
+            // Calculate time remaining
+            const startTime = new Date(auction.startTime);
+            const endTime = new Date(startTime.getTime() + auction.duration * 60 * 1000);
+            const now = new Date();
+            const timeLeft = Math.max(0, endTime - now);
+            
+            const timeStatus = timeLeft <= 0 ? 'ended' : 
+                             timeLeft < 300000 ? 'urgent' : 
+                             timeLeft < 3600000 ? 'soon' : 'active';
+            
+            // Get the first (and only) image
+            const previewImage = auction.images && auction.images.length > 0 ? auction.images[0] : null;
+            
+            return (
+              <div key={auction.id} className="auction-card">
+                <div className="auction-card-header">
+                  <h3 className="auction-title">{auction.itemName}</h3>
+                  
+                  {/* Single preview image */}
+                  {previewImage && (
+                    <div className="auction-card-single-image">
+                      <img 
+                        src={previewImage.data} 
+                        alt={auction.itemName}
+                        className="auction-single-preview-image"
+                      />
+                    </div>
+                  )}
+                  
+                  <p className="auction-description">{auction.description}</p>
+                </div>
+                
+                <div className="auction-card-body">
+                  <div className="current-bid">${currentBid.toFixed(2)}</div>
+                  
+                  <div className="auction-stats">
+                    <div className="stat-item">
+                      <div className="stat-label">Starting Price</div>
+                      <div className="stat-value">${startingPrice.toFixed(2)}</div>
+                    </div>
+                    <div className="stat-item">
+                      <div className="stat-label">Bid Increment</div>
+                      <div className="stat-value">${bidIncrement.toFixed(2)}</div>
+                    </div>
+                  </div>
+                  
+                  <div className="seller-info">
+                    <div className="seller-avatar">
+                      {auction.sellerName.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="seller-details">
+                      <div className="seller-name">{auction.sellerName}</div>
+                      <div className="seller-role">Verified Seller</div>
+                    </div>
+                  </div>
+                  
+                  <div className={`time-status ${timeStatus}`}>
+                    {timeLeft > 0 ? `${formatTime(timeLeft)} remaining` : 'Auction ended'}
+                  </div>
+                  
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => selectAuction(auction)}
+                    disabled={loading || timeLeft <= 0}
+                    style={{ width: '100%', fontSize: '1.1rem', marginTop: '16px' }}
+                  >
+                    {timeLeft <= 0 ? 'Auction Ended' : loading ? 'Loading...' : 'Enter Auction Room'}
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })}
         </div>
       )}
 
-      {/* Recent Bids */}
-      <div className="bids-section">
-        <h3>Recent Bids</h3>
-        {bids.length === 0 ? (
-          <p>No bids placed yet.</p>
-        ) : (
-          <div className="bids-list">
-            {bids.map(bid => (
-              <div key={bid.id} className="bid-item">
-                <div className="bid-amount">${parseFloat(bid.bidAmount).toFixed(2)}</div>
-                <div className="bid-details">
-                  <div className="bidder">{bid.bidderName}</div>
-                  <div className="bid-time">{new Date(bid.bidTime).toLocaleString()}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="participate-container">
-      <div className="participate-header">
-        <h1 className="participate-title">Auction Marketplace</h1>
-        <p className="participate-subtitle">
-          {user 
-            ? `Welcome ${user.user_metadata?.full_name || user.email.split('@')[0]}! Browse and bid on active auctions.`
-            : 'Browse active auctions. Sign in to place bids.'
-          }
-        </p>
-        <button 
-          className="btn btn-secondary" 
-          onClick={onBack}
-        >
-          Back to Home
-        </button>
-      </div>
-
+      {/* Message Display */}
       {message && (
         <div className={`message message-${messageType}`}>
           {message}
         </div>
       )}
 
-      <div className="participate-content">
-        {selectedAuction ? renderAuctionDetails() : renderAuctionList()}
+      <div className="form-actions">
+        <button className="btn btn-secondary" onClick={onBack}>
+          Back to Home
+        </button>
+        <button className="btn btn-primary" onClick={fetchAuctions}>
+          Refresh Auctions
+        </button>
       </div>
     </div>
   );
