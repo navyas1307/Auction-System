@@ -30,7 +30,7 @@ const sequelize = new Sequelize(getDatabaseUrl(), {
   }
 });
 
-// Define Auction model with image support and user authentication
+// Define Auction model with image support and optional user authentication
 export const Auction = sequelize.define('Auction', {
   id: {
     type: DataTypes.INTEGER,
@@ -69,8 +69,9 @@ export const Auction = sequelize.define('Auction', {
     allowNull: false
   },
   sellerId: {
-    type: DataTypes.UUID, // Supabase auth user ID
-    allowNull: false
+    type: DataTypes.STRING, // Changed from UUID to STRING and made nullable
+    allowNull: true, // Allow null for guest selling
+    defaultValue: null
   },
   status: {
     type: DataTypes.ENUM('active', 'ended'),
@@ -82,7 +83,7 @@ export const Auction = sequelize.define('Auction', {
   }
 });
 
-// Define Bid model with user authentication
+// Define Bid model with optional user authentication
 export const Bid = sequelize.define('Bid', {
   id: {
     type: DataTypes.INTEGER,
@@ -109,8 +110,9 @@ export const Bid = sequelize.define('Bid', {
     allowNull: false
   },
   bidderId: {
-    type: DataTypes.UUID, // Supabase auth user ID
-    allowNull: false
+    type: DataTypes.STRING, // Changed from UUID to STRING and made nullable
+    allowNull: true, // Allow null for guest bidding
+    defaultValue: null
   },
   bidTime: {
     type: DataTypes.DATE,
