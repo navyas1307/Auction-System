@@ -24,12 +24,7 @@ const ParticipateAuction = ({ onBack }) => {
     fetchAuctions();
     
     // Initialize socket connection
-    const socketUrl = process.env.NODE_ENV === 'development' 
-      ? (process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000')
-      : window.location.origin;
-    
-    console.log('Connecting to socket at:', socketUrl);
-    const newSocket = io(socketUrl);
+    const newSocket = io(API_BASE_URL);
     setSocket(newSocket);
 
     // Authenticate socket if user is logged in
@@ -40,18 +35,6 @@ const ParticipateAuction = ({ onBack }) => {
         }
       });
     }
-
-    newSocket.on('connect', () => {
-      console.log('Connected to server');
-    });
-
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
-    });
 
     newSocket.on('authenticated', (data) => {
       if (data.success) {
@@ -86,7 +69,6 @@ const ParticipateAuction = ({ onBack }) => {
     });
 
     newSocket.on('bidError', (error) => {
-      console.error('Bid error:', error);
       setMessage(error);
       setMessageType('error');
       setBidding(false);
@@ -94,7 +76,6 @@ const ParticipateAuction = ({ onBack }) => {
     });
 
     return () => {
-      console.log('Cleaning up socket connection');
       newSocket.close();
     };
   }, [user]);
@@ -173,7 +154,6 @@ const ParticipateAuction = ({ onBack }) => {
     fetchAuctionDetails(auction.id);
     
     if (socket) {
-      console.log('Joining auction:', auction.id);
       socket.emit('joinAuction', auction.id);
     }
   };
@@ -203,54 +183,22 @@ const ParticipateAuction = ({ onBack }) => {
       return;
     }
 
-    if (!socket) {
-      setMessage('Connection error. Please refresh the page.');
-      setMessageType('error');
-      setTimeout(() => setMessage(''), 5000);
-      return;
-    }
-
-    if (!socket.connected) {
-      setMessage('Connection lost. Please refresh the page.');
-      setMessageType('error');
-      setTimeout(() => setMessage(''), 5000);
-      return;
-    }
-
     setBidding(true);
-    console.log('Placing bid:', {
-      auctionId: selectedAuction.id,
-      bidAmount: bidValue,
-      bidderName: user.user_metadata?.full_name || user.email.split('@')[0],
-      bidderEmail: user.email
-    });
-
-    // Clear any previous messages
-    setMessage('');
     
-    try {
+    if (socket) {
       socket.emit('placeBid', {
         auctionId: selectedAuction.id,
         bidAmount: bidValue
       });
-
-      // Reset bidding state after a longer delay if no response received
-      setTimeout(() => {
-        if (bidding) {
-          setBidding(false);
-          setMessage('Bid timeout. Please try again.');
-          setMessageType('error');
-          setTimeout(() => setMessage(''), 5000);
-        }
-      }, 10000); // 10 second timeout
-
-    } catch (error) {
-      console.error('Error emitting bid:', error);
-      setBidding(false);
-      setMessage('Failed to place bid. Please try again.');
+    } else {
+      setMessage('Connection error. Please refresh the page.');
       setMessageType('error');
+      setBidding(false);
       setTimeout(() => setMessage(''), 5000);
     }
+
+    // Reset bidding state after a delay (will be reset earlier if bid succeeds/fails)
+    setTimeout(() => setBidding(false), 5000);
   };
 
   const formatTimeRemaining = (timeRemaining) => {
@@ -391,13 +339,6 @@ const ParticipateAuction = ({ onBack }) => {
         </div>
       </div>
 
-      {/* Connection Status */}
-      <div className="connection-status">
-        <span className={`status-indicator ${socket?.connected ? 'connected' : 'disconnected'}`}>
-          {socket?.connected ? '🟢 Connected' : '🔴 Disconnected'}
-        </span>
-      </div>
-
       {/* Bidding Section */}
       {selectedAuction.status === 'active' && selectedAuction.timeRemaining > 0 && (
         <div className="bidding-section">
@@ -420,20 +361,17 @@ const ParticipateAuction = ({ onBack }) => {
                   placeholder={`Minimum: $${(parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement)).toFixed(2)}`}
                   step="0.01"
                   min={parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement)}
-                  disabled={bidding || !socket?.connected}
+                  disabled={bidding}
                   className="bid-input"
                 />
                 <button 
                   onClick={handleBid} 
-                  disabled={bidding || !bidAmount || !socket?.connected}
+                  disabled={bidding || !bidAmount}
                   className="btn btn-primary bid-button"
                 >
                   {bidding ? 'Placing Bid...' : 'Place Bid'}
                 </button>
               </div>
-              {!socket?.connected && (
-                <p className="connection-warning">⚠️ Connection lost. Please refresh the page.</p>
-              )}
             </div>
           )}
         </div>
