@@ -52,6 +52,13 @@ const ParticipateAuction = ({ onBack }) => {
         setBids(prevBids => [bidData, ...prevBids.slice(0, 19)]); // Keep last 20 bids
         fetchAuctionDetails(bidData.auctionId); // Refresh auction details
       }
+      
+      // Show success message if this was the user's bid
+      setBidding(false);
+      setBidAmount('');
+      setMessage(`Bid placed successfully! Your bid: $${parseFloat(bidData.bidAmount).toFixed(2)}`);
+      setMessageType('success');
+      setTimeout(() => setMessage(''), 5000);
     });
 
     newSocket.on('auctionEnded', (data) => {
@@ -177,7 +184,7 @@ const ParticipateAuction = ({ onBack }) => {
     const minimumBid = parseFloat(selectedAuction.currentHighestBid) + parseFloat(selectedAuction.bidIncrement);
 
     if (isNaN(bidValue) || bidValue < minimumBid) {
-      setMessage(`Bid must be at least $${minimumBid.toFixed(2)}`);
+      setMessage(`Bid must be at least ${minimumBid.toFixed(2)}`);
       setMessageType('error');
       setTimeout(() => setMessage(''), 5000);
       return;
@@ -185,17 +192,23 @@ const ParticipateAuction = ({ onBack }) => {
 
     setBidding(true);
     
-    if (socket) {
-      socket.emit('placeBid', {
-        auctionId: selectedAuction.id,
-        bidAmount: bidValue
-      });
-    } else {
+    const connectionStatus = socketService.getConnectionStatus();
+    if (!connectionStatus.connected) {
       setMessage('Connection error. Please refresh the page.');
       setMessageType('error');
       setBidding(false);
       setTimeout(() => setMessage(''), 5000);
+      return;
     }
+
+    // Place bid using socket service with all required bidder information
+    socketService.placeBid({
+      auctionId: selectedAuction.id,
+      bidAmount: bidValue,
+      bidderEmail: user.email,
+      bidderName: user.user_metadata?.full_name || user.email.split('@')[0],
+      bidderId: user.id
+    });
 
     // Reset bidding state after a delay (will be reset earlier if bid succeeds/fails)
     setTimeout(() => setBidding(false), 5000);
