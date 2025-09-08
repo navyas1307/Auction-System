@@ -35,26 +35,26 @@ if (process.env.SENDGRID_API_KEY) {
 const publicDir = path.join(__dirname, 'public');
 const indexPath = path.join(publicDir, 'index.html');
 
-console.log('ðŸ“‚ Current directory:', __dirname);
-console.log('ðŸ“‚ Public directory:', publicDir);
-console.log('ðŸ“„ Index file:', indexPath);
+console.log('📂 Current directory:', __dirname);
+console.log('📂 Public directory:', publicDir);
+console.log('📄 Index file:', indexPath);
 
 try {
   if (fs.existsSync(publicDir)) {
-    console.log('âœ… Public directory exists');
+    console.log('✅ Public directory exists');
     const files = fs.readdirSync(publicDir);
-    console.log('ðŸ“‹ Files in public:', files.slice(0, 10)); // Show first 10 files
+    console.log('📋 Files in public:', files.slice(0, 10)); // Show first 10 files
   } else {
-    console.log('âŒ Public directory does not exist');
+    console.log('❌ Public directory does not exist');
   }
   
   if (fs.existsSync(indexPath)) {
-    console.log('âœ… index.html exists');
+    console.log('✅ index.html exists');
   } else {
-    console.log('âŒ index.html does not exist');
+    console.log('❌ index.html does not exist');
   }
 } catch (error) {
-  console.error('âŒ Error checking files:', error.message);
+  console.error('❌ Error checking files:', error.message);
 }
 
 // Middleware
@@ -74,7 +74,7 @@ let publicPath = null;
 for (const testPath of possiblePublicPaths) {
   if (fs.existsSync(testPath)) {
     publicPath = testPath;
-    console.log(`âœ… Found public directory at: ${testPath}`);
+    console.log(`✅ Found public directory at: ${testPath}`);
     break;
   }
 }
@@ -82,14 +82,14 @@ for (const testPath of possiblePublicPaths) {
 if (publicPath) {
   app.use(express.static(publicPath));
 } else {
-  console.log('âŒ Could not find public directory at any expected location');
+  console.log('❌ Could not find public directory at any expected location');
   console.log('Tried paths:', possiblePublicPaths);
 }
 
 // Debug middleware to log all API requests
 app.use('/api', (req, res, next) => {
-  console.log(`ðŸ“¡ API Request: ${req.method} ${req.path}`);
-  console.log('ðŸ“¦ Request body:', req.body);
+  console.log(`📡 API Request: ${req.method} ${req.path}`);
+  console.log('📦 Request body:', req.body);
   next();
 });
 
@@ -131,24 +131,24 @@ app.get('/api/debug', async (req, res) => {
 // API Routes - MUST come before the catch-all handler
 try {
   // Check if the route file exists and dependencies are available
-  console.log('ðŸ” Checking auction route dependencies...');
+  console.log('🔍 Checking auction route dependencies...');
   
   // Test if models are available
-  console.log('ðŸ“¦ Auction model available:', typeof Auction !== 'undefined');
-  console.log('ðŸ“¦ Bid model available:', typeof Bid !== 'undefined');
+  console.log('📦 Auction model available:', typeof Auction !== 'undefined');
+  console.log('📦 Bid model available:', typeof Bid !== 'undefined');
   
   // Test Redis service
   try {
     await redisService.getCurrentHighestBid(1); // Test call
-    console.log('âœ… Redis service is available');
+    console.log('✅ Redis service is available');
   } catch (redisError) {
-    console.log('âš ï¸ Redis service issue:', redisError.message);
+    console.log('⚠️ Redis service issue:', redisError.message);
   }
   
   app.use('/api/auctions', auctionRoutes);
-  console.log('âœ… Auction routes loaded successfully');
+  console.log('✅ Auction routes loaded successfully');
 } catch (error) {
-  console.error('âŒ Error loading auction routes:', error.message);
+  console.error('❌ Error loading auction routes:', error.message);
   console.error('Stack:', error.stack);
   
   // Fallback routes if the main routes file fails
@@ -171,17 +171,17 @@ try {
 
 // Catch-all handler: send back React's index.html file for any non-API routes
 app.get('*', (req, res) => {
-  console.log(`ðŸ“¥ Request for: ${req.path}`);
+  console.log(`📥 Request for: ${req.path}`);
   
   // Only serve index.html for non-API routes
   if (!req.path.startsWith('/api/')) {
     const indexFile = publicPath ? path.join(publicPath, 'index.html') : path.join(__dirname, 'public', 'index.html');
     
     if (fs.existsSync(indexFile)) {
-      console.log(`âœ… Serving index.html for: ${req.path}`);
+      console.log(`✅ Serving index.html for: ${req.path}`);
       res.sendFile(indexFile);
     } else {
-      console.log(`âŒ index.html not found at: ${indexFile}`);
+      console.log(`❌ index.html not found at: ${indexFile}`);
       res.status(404).send(`
         <h1>React App Not Found</h1>
         <p>The React build files are not available.</p>
@@ -205,21 +205,57 @@ io.on('connection', (socket) => {
     console.log(`User ${socket.id} joined auction ${auctionId}`);
   });
 
-  // Handle bid placement - matching your frontend event names
+  // Handle bid placement - FIXED VERSION
   socket.on('placeBid', async (bidData) => {
     try {
+      console.log('📦 Raw bid data received:', JSON.stringify(bidData, null, 2));
+      
       const { auctionId, bidAmount, bidderEmail, bidderName } = bidData;
-      console.log(`Received bid: ${bidAmount} from ${bidderName} for auction ${auctionId}`);
+      
+      // Validate required fields first
+      if (!bidAmount || !bidderEmail || !bidderName || !auctionId) {
+        console.log('❌ Missing required fields:', { 
+          auctionId: !!auctionId, 
+          bidAmount: !!bidAmount, 
+          bidderEmail: !!bidderEmail, 
+          bidderName: !!bidderName 
+        });
+        socket.emit('bidError', 'All bidder information is required (name, email, and bid amount)');
+        return;
+      }
+
+      // Additional validation
+      if (typeof bidderName !== 'string' || bidderName.trim().length === 0) {
+        console.log('❌ Invalid bidder name:', bidderName);
+        socket.emit('bidError', 'Please enter a valid name');
+        return;
+      }
+
+      if (typeof bidderEmail !== 'string' || !bidderEmail.includes('@')) {
+        console.log('❌ Invalid bidder email:', bidderEmail);
+        socket.emit('bidError', 'Please enter a valid email address');
+        return;
+      }
+
+      if (isNaN(parseFloat(bidAmount)) || parseFloat(bidAmount) <= 0) {
+        console.log('❌ Invalid bid amount:', bidAmount);
+        socket.emit('bidError', 'Please enter a valid bid amount');
+        return;
+      }
+
+      console.log(`📤 Processing bid: $${bidAmount} from ${bidderName.trim()} (${bidderEmail.trim()}) for auction ${auctionId}`);
       
       // Get auction details
-      const auction = await Auction.findByPk(auctionId);
+      const auction = await Auction.findByPk(parseInt(auctionId));
       if (!auction) {
+        console.log('❌ Auction not found:', auctionId);
         socket.emit('bidError', 'Auction not found');
         return;
       }
 
       // Check if auction is still active
       if (auction.status !== 'active') {
+        console.log('❌ Auction not active:', auction.status);
         socket.emit('bidError', 'Auction has ended');
         return;
       }
@@ -228,6 +264,7 @@ io.on('connection', (socket) => {
       const startTime = new Date(auction.startTime);
       const endTime = new Date(startTime.getTime() + auction.duration * 60 * 1000);
       if (new Date() > endTime) {
+        console.log('❌ Auction time expired');
         // End the auction if time has expired
         await endAuction(auctionId);
         socket.emit('bidError', 'Auction has ended');
@@ -236,37 +273,54 @@ io.on('connection', (socket) => {
 
       // Get current highest bid
       const currentHighestBid = await redisService.getCurrentHighestBid(auctionId);
-      const minimumBid = currentHighestBid + parseFloat(auction.bidIncrement);
+      const minimumBid = parseFloat(currentHighestBid) + parseFloat(auction.bidIncrement);
+
+      console.log(`💰 Bid validation - Current: $${currentHighestBid}, Minimum: $${minimumBid}, Submitted: $${bidAmount}`);
 
       // Validate bid amount
       if (parseFloat(bidAmount) < minimumBid) {
+        console.log('❌ Bid too low');
         socket.emit('bidError', `Bid must be at least $${minimumBid.toFixed(2)}`);
         return;
       }
 
-      // Save bid to database
-      await Bid.create({
-        auctionId,
+      // Generate a simple bidderId for tracking (since we're allowing guest bidding)
+      const bidderId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      console.log('💾 Saving bid to database...');
+
+      // Save bid to database with all required fields
+      const newBid = await Bid.create({
+        auctionId: parseInt(auctionId),
         bidAmount: parseFloat(bidAmount),
-        bidderName,
-        bidderEmail
+        bidderName: bidderName.trim(),
+        bidderEmail: bidderEmail.trim(),
+        bidderId: bidderId
       });
+
+      console.log('✅ Bid saved to database:', newBid.id);
 
       // Update highest bid in Redis
-      await redisService.setHighestBid(auctionId, bidAmount, bidderEmail, bidderName);
+      await redisService.setHighestBid(auctionId, bidAmount, bidderEmail.trim(), bidderName.trim());
+
+      console.log('✅ Redis updated with new highest bid');
 
       // Broadcast new bid to all users in the auction room
-      io.to(`auction_${auctionId}`).emit('newBid', {
-        auctionId,
+      const broadcastData = {
+        auctionId: parseInt(auctionId),
         bidAmount: parseFloat(bidAmount),
-        bidderName,
-        bidderEmail
-      });
+        bidderName: bidderName.trim(),
+        bidderEmail: bidderEmail.trim()
+      };
 
-      console.log(`âœ… New bid placed: $${bidAmount} by ${bidderName} on auction ${auctionId}`);
+      io.to(`auction_${auctionId}`).emit('newBid', broadcastData);
+
+      console.log(`🎉 New bid successfully placed and broadcast: $${bidAmount} by ${bidderName.trim()} on auction ${auctionId}`);
 
     } catch (error) {
-      console.error('âŒ Error placing bid:', error);
+      console.error('❌ Error placing bid:', error);
+      console.error('❌ Error stack:', error.stack);
+      console.error('❌ Bid data that caused error:', JSON.stringify(bidData, null, 2));
       socket.emit('bidError', 'Failed to place bid. Please try again.');
     }
   });
@@ -279,7 +333,7 @@ io.on('connection', (socket) => {
 // Function to end auction with email notifications
 const endAuction = async (auctionId) => {
   try {
-    console.log(`ðŸ Ending auction ${auctionId}...`);
+    console.log(`🏁 Ending auction ${auctionId}...`);
     
     // Update auction status
     await Auction.update(
@@ -310,7 +364,7 @@ const endAuction = async (auctionId) => {
         itemName: auction.itemName
       });
 
-      console.log(`âœ… Auction ${auctionId} ended. Winner: ${winnerData.bidderName} with $${winnerData.amount}`);
+      console.log(`✅ Auction ${auctionId} ended. Winner: ${winnerData.bidderName} with $${winnerData.amount}`);
     } else {
       // No bids were placed or no email setup
       io.to(`auction_${auctionId}`).emit('auctionEnded', {
@@ -320,11 +374,11 @@ const endAuction = async (auctionId) => {
         itemName: auction.itemName
       });
 
-      console.log(`âœ… Auction ${auctionId} ended with ${winnerData ? 'winner: ' + winnerData.bidderName : 'no bids'}`);
+      console.log(`✅ Auction ${auctionId} ended with ${winnerData ? 'winner: ' + winnerData.bidderName : 'no bids'}`);
     }
 
   } catch (error) {
-    console.error(`âŒ Error ending auction ${auctionId}:`, error);
+    console.error(`❌ Error ending auction ${auctionId}:`, error);
   }
 };
 
@@ -332,7 +386,7 @@ const endAuction = async (auctionId) => {
 const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningBid, winnerName, sellerName) => {
   try {
     if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
-      console.log('âš ï¸ SendGrid not configured, skipping email notifications');
+      console.log('⚠️ SendGrid not configured, skipping email notifications');
       return;
     }
 
@@ -342,7 +396,7 @@ const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningB
       from: process.env.SENDGRID_FROM_EMAIL,
       subject: `Auction Ended - ${itemName}`,
       html: `
-        <h2>Your Auction Has Ended! ðŸŽ‰</h2>
+        <h2>Your Auction Has Ended! 🎉</h2>
         <p>Dear ${sellerName},</p>
         <p>Your auction for <strong>${itemName}</strong> has ended.</p>
         <p><strong>Winning Bid:</strong> $${parseFloat(winningBid).toFixed(2)}</p>
@@ -360,7 +414,7 @@ const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningB
       from: process.env.SENDGRID_FROM_EMAIL,
       subject: `Congratulations! You Won - ${itemName}`,
       html: `
-        <h2>Congratulations! You Won the Auction! ðŸ†</h2>
+        <h2>Congratulations! You Won the Auction! 🏆</h2>
         <p>Dear ${winnerName},</p>
         <p>You have won the auction for <strong>${itemName}</strong>!</p>
         <p><strong>Your Winning Bid:</strong> $${parseFloat(winningBid).toFixed(2)}</p>
@@ -377,9 +431,9 @@ const sendAuctionEndEmails = async (sellerEmail, bidderEmail, itemName, winningB
       sgMail.send(bidderMsg)
     ]);
     
-    console.log('ðŸ“§ Auction end emails sent successfully');
+    console.log('📧 Auction end emails sent successfully');
   } catch (error) {
-    console.error('âŒ Error sending emails:', error);
+    console.error('❌ Error sending emails:', error);
   }
 };
 
@@ -391,13 +445,13 @@ const PORT = process.env.PORT || 3000;
 
 try {
   await initializeDatabase();
-  console.log('âœ… Database initialized successfully');
+  console.log('✅ Database initialized successfully');
   
   server.listen(PORT, () => {
-    console.log(`ðŸš€ Server running on port ${PORT}`);
-    console.log(`ðŸ“§ Email notifications: ${process.env.SENDGRID_API_KEY ? 'Enabled' : 'Disabled (add SENDGRID_API_KEY to enable)'}`);
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📧 Email notifications: ${process.env.SENDGRID_API_KEY ? 'Enabled' : 'Disabled (add SENDGRID_API_KEY to enable)'}`);
   });
 } catch (error) {
-  console.error('âŒ Failed to start server:', error);
+  console.error('❌ Failed to start server:', error);
   process.exit(1);
 }
