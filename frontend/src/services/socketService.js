@@ -4,6 +4,7 @@ class SocketService {
   constructor() {
     this.socket = null;
     this.isConnected = false;
+    this.isAuthenticated = false;
   }
 
   connect() {
@@ -23,14 +24,33 @@ class SocketService {
 
       this.socket.on('disconnect', () => {
         this.isConnected = false;
+        this.isAuthenticated = false;
         console.log('Disconnected from server');
       });
 
       this.socket.on('connect_error', (error) => {
         console.error('Socket connection error:', error);
       });
+
+      // Handle authentication response
+      this.socket.on('authenticated', (data) => {
+        if (data.success) {
+          this.isAuthenticated = true;
+          console.log('Socket authenticated successfully');
+        } else {
+          this.isAuthenticated = false;
+          console.error('Socket authentication failed:', data.error);
+        }
+      });
     }
     return this.socket;
+  }
+
+  authenticate(token) {
+    if (this.socket && token) {
+      console.log('Authenticating socket with token');
+      this.socket.emit('authenticate', token);
+    }
   }
 
   disconnect() {
@@ -38,20 +58,25 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
+      this.isAuthenticated = false;
     }
   }
 
   joinAuction(auctionId) {
-    if (this.socket) {
+    if (this.socket && this.isConnected) {
       console.log('Joining auction:', auctionId);
       this.socket.emit('joinAuction', auctionId);
+    } else {
+      console.warn('Cannot join auction: socket not connected');
     }
   }
 
   placeBid(bidData) {
-    if (this.socket) {
+    if (this.socket && this.isConnected) {
       console.log('Placing bid:', bidData);
       this.socket.emit('placeBid', bidData);
+    } else {
+      console.warn('Cannot place bid: socket not connected');
     }
   }
 
@@ -73,10 +98,51 @@ class SocketService {
     }
   }
 
+  onAuthenticated(callback) {
+    if (this.socket) {
+      this.socket.on('authenticated', callback);
+    }
+  }
+
   removeAllListeners() {
     if (this.socket) {
       this.socket.removeAllListeners();
+      // Re-add essential connection listeners
+      this.socket.on('connect', () => {
+        this.isConnected = true;
+        console.log('Connected to server');
+      });
+
+      this.socket.on('disconnect', () => {
+        this.isConnected = false;
+        this.isAuthenticated = false;
+        console.log('Disconnected from server');
+      });
+
+      this.socket.on('authenticated', (data) => {
+        if (data.success) {
+          this.isAuthenticated = true;
+          console.log('Socket authenticated successfully');
+        } else {
+          this.isAuthenticated = false;
+          console.error('Socket authentication failed:', data.error);
+        }
+      });
     }
+  }
+
+  // Remove specific event listeners
+  removeListener(event) {
+    if (this.socket) {
+      this.socket.off(event);
+    }
+  }
+
+  getConnectionStatus() {
+    return {
+      connected: this.isConnected,
+      authenticated: this.isAuthenticated
+    };
   }
 }
 
