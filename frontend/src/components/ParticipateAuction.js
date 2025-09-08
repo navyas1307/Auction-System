@@ -20,6 +20,8 @@ const ParticipateAuction = ({ onBack }) => {
   const [isAuctionEnded, setIsAuctionEnded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingAuctions, setLoadingAuctions] = useState(true);
+  const [myBids, setMyBids] = useState([]); // Track user's bids
+  const [isMyBidLeading, setIsMyBidLeading] = useState(false); // Track if user is winning
 
   useEffect(() => {
     fetchAuctions();
@@ -51,22 +53,71 @@ const ParticipateAuction = ({ onBack }) => {
 
       // Socket event listeners
       socketService.onNewBid((data) => {
+        console.log('🎉 Frontend received newBid event:', data);
         setCurrentBid(parseFloat(data.bidAmount));
-        setMessage(`New bid placed: $${parseFloat(data.bidAmount).toFixed(2)} by ${data.bidderName}`);
-        setMessageType('info');
-        setTimeout(() => setMessage(''), 5000);
+        
+        // Update the highest bidder in the selected auction
+        setSelectedAuction(prev => ({
+          ...prev,
+          currentHighestBid: parseFloat(data.bidAmount),
+          highestBidder: data.bidderName
+        }));
+        
+        // Check if this is my bid by comparing name and email
+        const isMyBid = data.bidderEmail.toLowerCase() === bidderEmail.toLowerCase() && 
+                       data.bidderName.toLowerCase() === bidderName.toLowerCase();
+        
+        if (isMyBid) {
+          // Add to my bids and mark as leading
+          setMyBids(prev => [{
+            amount: parseFloat(data.bidAmount),
+            time: new Date(),
+            status: 'leading'
+          }, ...prev.map(bid => ({ ...bid, status: 'outbid' }))]);
+          
+          setIsMyBidLeading(true);
+          setMessage(`✅ SUCCESS! Your bid of $${parseFloat(data.bidAmount).toFixed(2)} was placed successfully! You are now the leading bidder.`);
+          setMessageType('success');
+        } else {
+          // Update my previous bids status if someone else bid
+          setMyBids(prev => prev.map(bid => ({ ...bid, status: 'outbid' })));
+          setIsMyBidLeading(false);
+          setMessage(`New bid placed: $${parseFloat(data.bidAmount).toFixed(2)} by ${data.bidderName}`);
+          setMessageType('info');
+        }
+        
+        setTimeout(() => setMessage(''), 8000);
       });
 
       socketService.onBidError((error) => {
+        console.log('❌ Frontend received bidError event:', error);
         setMessage(error);
         setMessageType('error');
         setTimeout(() => setMessage(''), 5000);
       });
 
       socketService.onAuctionEnded((data) => {
+        console.log('🏁 Frontend received auctionEnded event:', data);
         setIsAuctionEnded(true);
-        setMessage(`Auction completed! Winner: ${data.winner} with $${parseFloat(data.highestBid).toFixed(2)}`);
-        setMessageType('success');
+        
+        // Update the final state
+        setCurrentBid(parseFloat(data.highestBid));
+        setSelectedAuction(prev => ({
+          ...prev,
+          status: 'ended',
+          currentHighestBid: parseFloat(data.highestBid),
+          highestBidder: data.winner
+        }));
+        
+        // Check if I won
+        const didIWin = data.winner.toLowerCase() === bidderName.toLowerCase();
+        if (didIWin) {
+          setMessage(`🎉 CONGRATULATIONS! You won the auction with $${parseFloat(data.highestBid).toFixed(2)}!`);
+          setMessageType('success');
+        } else {
+          setMessage(`Auction completed! Winner: ${data.winner} with $${parseFloat(data.highestBid).toFixed(2)}`);
+          setMessageType('info');
+        }
       });
 
       return () => {
@@ -75,7 +126,7 @@ const ParticipateAuction = ({ onBack }) => {
         socketService.disconnect();
       };
     }
-  }, [selectedAuction]);
+  }, [selectedAuction, bidderName, bidderEmail]); // Add bidderName and bidderEmail as dependencies
 
   const fetchAuctions = async () => {
     try {
@@ -95,6 +146,10 @@ const ParticipateAuction = ({ onBack }) => {
   const selectAuction = async (auction) => {
     try {
       setLoading(true);
+      // Reset bid tracking when selecting new auction
+      setMyBids([]);
+      setIsMyBidLeading(false);
+      
       const response = await axios.get(`${API_BASE_URL}/api/auctions/${auction.id}`);
       setSelectedAuction(response.data);
       setCurrentBid(parseFloat(response.data.currentHighestBid));
@@ -164,17 +219,18 @@ const ParticipateAuction = ({ onBack }) => {
 
     console.log('🚀 Sending complete bid data:', bidData); // Debug log
 
-    const success = socketService.placeBid(bidData);
+    // ✅ SIMPLIFIED: Just send the bid and let socket events handle the response
+    socketService.placeBid(bidData);
+    setBidAmount('');
+    setMessage('Processing your bid...');
+    setMessageType('info');
     
-    if (success) {
-      setBidAmount('');
-      setMessage('Processing your bid...');
-      setMessageType('info');
-    } else {
-      setMessage('Failed to connect to auction server. Please try again.');
-      setMessageType('error');
-      setTimeout(() => setMessage(''), 5000);
-    }
+    // Clear the processing message after a few seconds if no response
+    setTimeout(() => {
+      if (message === 'Processing your bid...') {
+        setMessage('');
+      }
+    }, 10000);
   };
 
   const formatTime = (milliseconds) => {
@@ -230,6 +286,11 @@ const ParticipateAuction = ({ onBack }) => {
       <div className="auction-room">
         <div className="auction-room-header">
           <h1 className="auction-room-title">Live Auction Room</h1>
+          {isMyBidLeading && !isAuctionEnded && (
+            <div className="leading-badge">
+              🏆 You are leading!
+            </div>
+          )}
         </div>
 
         <div className="auction-info-card">
@@ -270,8 +331,9 @@ const ParticipateAuction = ({ onBack }) => {
           <div className="auction-stats">
             <div className="stat-item">
               <div className="stat-label">Current Highest Bid</div>
-              <div className="stat-value" style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--primary-color)' }}>
+              <div className="stat-value" style={{ fontSize: '2rem', fontWeight: 'bold', color: isMyBidLeading ? '#22c55e' : 'var(--primary-color)' }}>
                 ${currentBid.toFixed(2)}
+                {isMyBidLeading && <span style={{ fontSize: '1rem', marginLeft: '8px' }}>🏆</span>}
               </div>
             </div>
             <div className="stat-item">
@@ -280,8 +342,9 @@ const ParticipateAuction = ({ onBack }) => {
             </div>
             <div className="stat-item">
               <div className="stat-label">Leading Bidder</div>
-              <div className="stat-value">
+              <div className="stat-value" style={{ color: isMyBidLeading ? '#22c55e' : 'var(--text-primary)' }}>
                 {selectedAuction.highestBidder || 'No bids yet'}
+                {isMyBidLeading && ' (You!)'}
               </div>
             </div>
           </div>
@@ -297,6 +360,24 @@ const ParticipateAuction = ({ onBack }) => {
             )}
           </div>
         </div>
+
+        {/* My Bids Section */}
+        {myBids.length > 0 && (
+          <div className="my-bids-section">
+            <h3>Your Bids on This Auction</h3>
+            <div className="bids-list">
+              {myBids.slice(0, 5).map((bid, index) => (
+                <div key={index} className={`bid-item ${bid.status}`}>
+                  <span className="bid-amount">${bid.amount.toFixed(2)}</span>
+                  <span className="bid-time">{bid.time.toLocaleTimeString()}</span>
+                  <span className={`bid-status ${bid.status}`}>
+                    {bid.status === 'leading' ? '🏆 Leading' : '❌ Outbid'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {!isAuctionEnded && timeRemaining > 0 && (
           <div className="bid-section">
@@ -379,14 +460,14 @@ const ParticipateAuction = ({ onBack }) => {
                 <div style={{ 
                   marginTop: '24px', 
                   padding: '24px', 
-                  background: 'linear-gradient(135deg, #dcfce7, #bbf7d0)',
+                  background: isMyBidLeading ? 'linear-gradient(135deg, #dcfce7, #bbf7d0)' : 'linear-gradient(135deg, #f3f4f6, #e5e7eb)',
                   borderRadius: 'var(--radius-xl)',
-                  border: '2px solid #bbf7d0'
+                  border: `2px solid ${isMyBidLeading ? '#bbf7d0' : '#d1d5db'}`
                 }}>
-                  <div style={{ color: '#166534', fontWeight: '700', fontSize: '1.2rem' }}>
-                    Winner: {selectedAuction.highestBidder}
+                  <div style={{ color: isMyBidLeading ? '#166534' : '#374151', fontWeight: '700', fontSize: '1.2rem' }}>
+                    Winner: {selectedAuction.highestBidder} {isMyBidLeading && '🎉 (That\'s you!)'}
                   </div>
-                  <div style={{ color: '#166534', fontWeight: '800', fontSize: '1.8rem', marginTop: '8px' }}>
+                  <div style={{ color: isMyBidLeading ? '#166534' : '#374151', fontWeight: '800', fontSize: '1.8rem', marginTop: '8px' }}>
                     Final Bid: ${currentBid.toFixed(2)}
                   </div>
                 </div>
