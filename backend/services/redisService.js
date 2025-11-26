@@ -1,126 +1,92 @@
-import Redis from 'ioredis';
+// redisService.js — Upstash REST version (No ioredis)
 
-// In-memory fallback storage
+import { Redis } from "@upstash/redis";
+
+// fallback memory
 let memoryStorage = new Map();
-let redisConnected = false;
 let redis = null;
+let redisConnected = false;
 
-// Initialize Redis with error handling
-const initRedis = async () => {
+// Initialize Upstash REST client
+const initRedis = () => {
   try {
-    if (process.env.UPSTASH_REDIS_URL) {
-      redis = new Redis(process.env.UPSTASH_REDIS_URL);
-      
-      // Test the connection
-      await redis.ping();
+    if (
+      process.env.UPSTASH_REDIS_REST_URL &&
+      process.env.UPSTASH_REDIS_REST_TOKEN
+    ) {
+      redis = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      });
       redisConnected = true;
-      console.log('✅ Redis connected successfully');
-      return true;
+      console.log("✅ Redis REST connected successfully");
     } else {
-      console.log('⚠️ UPSTASH_REDIS_URL not found, using in-memory storage');
-      return false;
+      console.log("⚠️ Missing Upstash REST env vars → Using in-memory fallback");
     }
-  } catch (error) {
-    console.log('❌ Redis connection failed, falling back to in-memory storage:', error.message);
-    redis = null;
-    redisConnected = false;
-    return false;
+  } catch (err) {
+    console.log("❌ Redis init failed → Using memory fallback", err.message);
   }
 };
 
-// Initialize on module load
 initRedis();
 
-export const setHighestBid = async (auctionId, amount, bidderEmail, bidderName) => {
+// -------------------- SET HIGHEST BID --------------------
+export const setHighestBid = async (auctionId, amount, email, name) => {
   const bidData = {
     amount: parseFloat(amount),
-    bidderEmail: bidderEmail,
-    bidderName: bidderName,
-    timestamp: new Date().toISOString()
+    bidderEmail: email,
+    bidderName: name,
+    timestamp: new Date().toISOString(),
   };
-  
+
   try {
-    if (redisConnected && redis) {
-      const key = `auction:${auctionId}:highest_bid`;
-      await redis.set(key, JSON.stringify(bidData));
-      console.log(`💾 Redis: Stored bid for auction ${auctionId}: $${amount} by ${bidderName || 'Starting price'}`);
+    if (redisConnected) {
+      await redis.set(`auction:${auctionId}:highest_bid`, JSON.stringify(bidData));
     } else {
-      // Fallback to in-memory storage
       memoryStorage.set(`auction:${auctionId}:highest_bid`, bidData);
-      console.log(`💾 Memory: Stored bid for auction ${auctionId}: $${amount} by ${bidderName || 'Starting price'}`);
     }
+
     return bidData;
-  } catch (error) {
-    console.error('❌ Error setting highest bid, falling back to memory:', error.message);
-    // Fallback to memory if Redis fails
+  } catch (err) {
+    console.log("❌ Redis error, using fallback:", err.message);
     memoryStorage.set(`auction:${auctionId}:highest_bid`, bidData);
     return bidData;
   }
 };
 
+// -------------------- GET CURRENT HIGHEST BID --------------------
 export const getCurrentHighestBid = async (auctionId) => {
   try {
-    if (redisConnected && redis) {
-      const key = `auction:${auctionId}:highest_bid`;
-      const data = await redis.get(key);
-      
-      if (data) {
-        const bidData = JSON.parse(data);
-        return parseFloat(bidData.amount);
-      }
-    } else {
-      // Fallback to in-memory storage
-      const data = memoryStorage.get(`auction:${auctionId}:highest_bid`);
-      if (data) {
-        return parseFloat(data.amount);
-      }
+    if (redisConnected) {
+      const data = await redis.get(`auction:${auctionId}:highest_bid`);
+      if (data) return JSON.parse(data).amount;
     }
-    
-    return 0;
-  } catch (error) {
-    console.error('❌ Error getting current highest bid, trying memory fallback:', error.message);
-    // Try memory fallback
-    const data = memoryStorage.get(`auction:${auctionId}:highest_bid`);
-    return data ? parseFloat(data.amount) : 0;
+
+    const fallback = memoryStorage.get(`auction:${auctionId}:highest_bid`);
+    return fallback ? fallback.amount : 0;
+  } catch (err) {
+    const fallback = memoryStorage.get(`auction:${auctionId}:highest_bid`);
+    return fallback ? fallback.amount : 0;
   }
 };
 
+// -------------------- GET FULL BID DATA --------------------
 export const getHighestBidData = async (auctionId) => {
   try {
-    if (redisConnected && redis) {
-      const key = `auction:${auctionId}:highest_bid`;
-      const data = await redis.get(key);
-      
-      if (data) {
-        const bidData = JSON.parse(data);
-        return {
-          ...bidData,
-          amount: parseFloat(bidData.amount)
-        };
-      }
-    } else {
-      // Fallback to in-memory storage
-      const data = memoryStorage.get(`auction:${auctionId}:highest_bid`);
-      if (data) {
-        return {
-          ...data,
-          amount: parseFloat(data.amount)
-        };
-      }
+    if (redisConnected) {
+      const data = await redis.get(`auction:${auctionId}:highest_bid`);
+      return data ? JSON.parse(data) : null;
     }
-    
-    return null;
-  } catch (error) {
-    console.error('❌ Error getting highest bid data, trying memory fallback:', error.message);
-    // Try memory fallback
-    const data = memoryStorage.get(`auction:${auctionId}:highest_bid`);
-    return data ? { ...data, amount: parseFloat(data.amount) } : null;
+    return memoryStorage.get(`auction:${auctionId}:highest_bid`) || null;
+  } catch (err) {
+    return memoryStorage.get(`auction:${auctionId}:highest_bid`) || null;
   }
 };
 
-// Export connection status for debugging
+// Debug endpoint helper
 export const getConnectionStatus = () => ({
   redisConnected,
-  redisUrl: process.env.UPSTASH_REDIS_URL ? 'Set' : 'Not set',
-  memoryStorageSize: memoryStorage.size
+  redisUrl: process.env.UPSTASH_REDIS_REST_URL ? "Set" : "Not set",
+  memoryStorage: memoryStorage.size,
 });
+
